@@ -4,10 +4,25 @@ Dissimilarity measures for clustering
 
 import numpy as np
 
+def find_beta_for_categorical(X):
+    D = X.shape[1]
+    list_of_beta = []
+    for col in range(D):
+        unique, count = np.unique(X[:, col], return_counts=True)
+        frequency = count/len(X[:, col])
+        beta = 1 / (1 - np.sum(frequency**2))
+        list_of_beta.append(beta)
+    return np.array(list_of_beta)
+
 
 def matching_dissim(a, b, **_):
     """Simple matching dissimilarity function"""
-    return np.sum(a != b, axis=1)
+    dissimilarity = 1 * (a != b)
+    if 'X' in _:
+        list_of_beta = find_beta_for_categorical(_['X'])
+        return np.sum(dissimilarity * list_of_beta, axis=1)
+    else:
+        return np.sum(dissimilarity, axis=1)
 
 
 def euclidean_dissim(a, b, **_):
