@@ -14,7 +14,7 @@ from sklearn.utils.validation import check_array
 
 from . import kmodes
 from .util import get_max_value_key, encode_features, get_unique_rows, decode_centroids
-from .util.dissim import matching_dissim, euclidean_dissim
+from .util.dissim import matching_dissim, euclidean_dissim, find_beta_for_categorical
 
 # Number of tries we give the initialization methods to find non-empty
 # clusters before we switch to random initialization.
@@ -49,7 +49,7 @@ def _split_num_cat(X, categorical):
     return Xnum, Xcat
 
 
-def _labels_cost(Xnum, Xcat, centroids, num_dissim, cat_dissim, gamma, membship=None):
+def _labels_cost(Xnum, Xcat, centroids, num_dissim, cat_dissim, gamma, list_of_beta_cat, membship=None):
     """Calculate labels and cost function given a matrix of points and
     a list of centroids for the k-prototypes algorithm.
     """
@@ -62,7 +62,7 @@ def _labels_cost(Xnum, Xcat, centroids, num_dissim, cat_dissim, gamma, membship=
     for ipoint in range(n_points):
         # Numerical cost = sum of Euclidean distances
         num_costs = num_dissim(centroids[0], Xnum[ipoint])
-        cat_costs = cat_dissim(centroids[1], Xcat[ipoint], X=Xcat, membship=membship)
+        cat_costs = cat_dissim(centroids[1], Xcat[ipoint], X=Xcat, membship=membship, list_of_beta=list_of_beta_cat)
         # Gamma relates the categorical cost to the numerical cost.
         tot_costs = num_costs + gamma * cat_costs
         clust = np.argmin(tot_costs)
@@ -73,13 +73,13 @@ def _labels_cost(Xnum, Xcat, centroids, num_dissim, cat_dissim, gamma, membship=
 
 
 def _k_prototypes_iter(Xnum, Xcat, centroids, cl_attr_sum, cl_memb_sum, cl_attr_freq,
-                       membship, num_dissim, cat_dissim, gamma, random_state):
+                       membship, num_dissim, cat_dissim, gamma, random_state, list_of_beta_cat):
     """Single iteration of the k-prototypes algorithm"""
     moves = 0
     for ipoint in range(Xnum.shape[0]):
         clust = np.argmin(
             num_dissim(centroids[0], Xnum[ipoint]) +
-            gamma * cat_dissim(centroids[1], Xcat[ipoint], X=Xcat, membship=membship)
+            gamma * cat_dissim(centroids[1], Xcat[ipoint], X=Xcat, membship=membship, list_of_beta=list_of_beta_cat)
         )
         if membship[clust, ipoint]:
             # Point is already in its right place.
@@ -128,7 +128,7 @@ def _k_prototypes_iter(Xnum, Xcat, centroids, cl_attr_sum, cl_memb_sum, cl_attr_
 
 def k_prototypes_single(Xnum, Xcat, nnumattrs, ncatattrs, n_clusters, n_points,
                         max_iter, num_dissim, cat_dissim, gamma, init, init_no,
-                        verbose, random_state):
+                        verbose, random_state, list_of_beta_cat):
     # For numerical part of initialization, we don't have a guarantee
     # that there is not an empty cluster, so we need to retry until
     # there is none.
@@ -194,7 +194,7 @@ def k_prototypes_single(Xnum, Xcat, nnumattrs, ncatattrs, n_clusters, n_points,
             # Initial assignment to clusters
             clust = np.argmin(
                 num_dissim(centroids[0], Xnum[ipoint]) + gamma *
-                cat_dissim(centroids[1], Xcat[ipoint], X=Xcat, membship=membship)
+                cat_dissim(centroids[1], Xcat[ipoint], X=Xcat, membship=membship, list_of_beta=list_of_beta_cat)
             )
             membship[clust, ipoint] = 1
             cl_memb_sum[clust] += 1
@@ -237,11 +237,11 @@ def k_prototypes_single(Xnum, Xcat, nnumattrs, ncatattrs, n_clusters, n_points,
         centroids, moves = _k_prototypes_iter(Xnum, Xcat, centroids,
                                               cl_attr_sum, cl_memb_sum, cl_attr_freq,
                                               membship, num_dissim, cat_dissim, gamma,
-                                              random_state)
+                                              random_state, list_of_beta_cat)
 
         # All points seen in this iteration
         labels, ncost = _labels_cost(Xnum, Xcat, centroids,
-                                     num_dissim, cat_dissim, gamma, membship)
+                                     num_dissim, cat_dissim, gamma, list_of_beta_cat, membship)
         converged = (moves == 0) or (ncost >= cost)
         cost = ncost
         if verbose:
@@ -288,6 +288,9 @@ def k_prototypes(X, categorical, n_clusters, max_iter, num_dissim, cat_dissim,
     # Based on the unique values in Xcat, we can make a mapping to achieve this.
     Xcat, enc_map = encode_features(Xcat)
 
+    # Getting list of beta for the categorical variable (lisiyi)
+    list_of_beta = find_beta_for_categorical(Xcat)
+
     # Are there more n_clusters than unique rows? Then set the unique
     # rows as initial values and skip iteration.
     unique = get_unique_rows(X)
@@ -311,13 +314,13 @@ def k_prototypes(X, categorical, n_clusters, max_iter, num_dissim, cat_dissim,
             results.append(k_prototypes_single(Xnum, Xcat, nnumattrs, ncatattrs,
                                                n_clusters, n_points, max_iter,
                                                num_dissim, cat_dissim, gamma,
-                                               init, init_no, verbose, seeds[init_no]))
+                                               init, init_no, verbose, seeds[init_no], list_of_beta))
     else:
         results = Parallel(n_jobs=n_jobs, verbose=0)(
             delayed(k_prototypes_single)(Xnum, Xcat, nnumattrs, ncatattrs,
                                          n_clusters, n_points, max_iter,
                                          num_dissim, cat_dissim, gamma,
-                                         init, init_no, verbose, seed)
+                                         init, init_no, verbose, seed, list_of_beta)
             for init_no, seed in enumerate(seeds))
     all_centroids, all_labels, all_costs, all_n_iters = zip(*results)
 
@@ -327,7 +330,7 @@ def k_prototypes(X, categorical, n_clusters, max_iter, num_dissim, cat_dissim,
 
     # Note: return gamma in case it was automatically determined.
     return all_centroids[best], enc_map, all_labels[best], \
-        all_costs[best], all_n_iters[best], gamma
+        all_costs[best], all_n_iters[best], gamma, list_of_beta
 
 
 class KPrototypes(kmodes.KModes):
@@ -439,18 +442,18 @@ class KPrototypes(kmodes.KModes):
         # If self.gamma is None, gamma will be automatically determined from
         # the data. The function below returns its value.
         self._enc_cluster_centroids, self._enc_map, self.labels_, self.cost_,\
-            self.n_iter_, self.gamma = k_prototypes(X,
-                                                    categorical,
-                                                    self.n_clusters,
-                                                    self.max_iter,
-                                                    self.num_dissim,
-                                                    self.cat_dissim,
-                                                    self.gamma,
-                                                    self.init,
-                                                    self.n_init,
-                                                    self.verbose,
-                                                    random_state,
-                                                    self.n_jobs)
+            self.n_iter_, self.gamma, self.list_of_beta = k_prototypes(X,
+                                                                       categorical,
+                                                                       self.n_clusters,
+                                                                       self.max_iter,
+                                                                       self.num_dissim,
+                                                                       self.cat_dissim,
+                                                                       self.gamma,
+                                                                       self.init,
+                                                                       self.n_init,
+                                                                       self.verbose,
+                                                                       random_state,
+                                                                       self.n_jobs)
         return self
 
     def predict(self, X, categorical=None):
@@ -473,7 +476,7 @@ class KPrototypes(kmodes.KModes):
         Xnum, Xcat = check_array(Xnum), check_array(Xcat, dtype=None)
         Xcat, _ = encode_features(Xcat, enc_map=self._enc_map)
         return _labels_cost(Xnum, Xcat, self._enc_cluster_centroids,
-                            self.num_dissim, self.cat_dissim, self.gamma)[0]
+                            self.num_dissim, self.cat_dissim, self.gamma, self.list_of_beta)[0]
 
     @property
     def cluster_centroids_(self):

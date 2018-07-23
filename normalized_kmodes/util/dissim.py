@@ -18,9 +18,8 @@ def find_beta_for_categorical(X):
 def matching_dissim(a, b, **_):
     """Simple matching dissimilarity function"""
     dissimilarity = 1 * (a != b)
-    if 'X' in _:
-        list_of_beta = find_beta_for_categorical(_['X'])
-        return np.sum(dissimilarity * list_of_beta, axis=1)
+    if 'list_of_beta' in _:
+        return np.sum(dissimilarity * _['list_of_beta'], axis=1)
     else:
         return np.sum(dissimilarity, axis=1)
 
