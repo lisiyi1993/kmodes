@@ -18,10 +18,10 @@ from .util.dissim import matching_dissim, euclidean_dissim, find_beta_for_catego
 
 # Number of tries we give the initialization methods to find non-empty
 # clusters before we switch to random initialization.
-MAX_INIT_TRIES = 20
+MAX_INIT_TRIES = 100
 # Number of tries we give the initialization before we raise an
 # initialization error.
-RAISE_INIT_TRIES = 100
+RAISE_INIT_TRIES = 200
 
 
 def move_point_num(point, to_clust, from_clust, cl_attr_sum, cl_memb_sum):

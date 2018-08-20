@@ -11,15 +11,18 @@ def find_beta_for_categorical(X):
         unique, count = np.unique(X[:, col], return_counts=True)
         frequency = count/len(X[:, col])
         beta = 1 / (1 - np.sum(frequency**2))
-        list_of_beta.append(beta)
+        if np.isinf(beta):
+            list_of_beta.append(0)
+        else:
+            list_of_beta.append(beta)
     return np.array(list_of_beta)
 
 
-def matching_dissim(a, b, **_):
+def matching_dissim(a, b, list_of_beta=None, **_):
     """Simple matching dissimilarity function"""
     dissimilarity = 1 * (a != b)
-    if 'list_of_beta' in _:
-        return np.sum(dissimilarity * _['list_of_beta'], axis=1)
+    if list_of_beta is not None:
+        return np.sum(dissimilarity * list_of_beta, axis=1)
     else:
         return np.sum(dissimilarity, axis=1)
 
